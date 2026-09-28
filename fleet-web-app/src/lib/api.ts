@@ -94,44 +94,63 @@ export class ApiError extends Error {
  */
 export function getReadableErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
+    const raw = error.message?.trim() ?? "";
+    const lower = raw.toLowerCase();
+
+    if (
+      lower.includes("not supported") ||
+      lower.includes("unsupported") ||
+      lower.includes("not available on this vehicle") ||
+      lower.includes("not available for this vehicle")
+    ) {
+      return "That feature isn’t supported on this vehicle yet.";
+    }
+
     switch (error.reason) {
       case "config_error":
         return API_NOT_CONFIGURED_MESSAGE;
       case "network_error":
-        return "We couldn’t reach the Parlé backend. Check your connection and try again.";
+        return "We couldn’t reach Parlé. Check your connection and try again.";
       case "auth_error":
-        return "The app couldn’t authenticate with the backend. Please contact support.";
+        return "Parlé couldn’t authenticate this request. Sign in again or contact support.";
       case "access_denied":
-        return error.message ||
-          "You don’t have access to this vehicle, or your temporary access has expired.";
+        return "You don’t have permission to control this vehicle, or the temporary access has expired.";
       case "tesla_auth_error":
       case "auth_expired_or_invalid":
-        return "Your Tesla connection has expired. Please reconnect your Tesla account.";
+        return "Your Tesla connection has expired. Reconnect Tesla and try again.";
       case "tesla_pairing_required":
       case "vcp_required":
-        return "This vehicle needs to be paired with Parlé. On the car’s touchscreen, allow mobile access and approve Parlé under third-party apps, then try again.";
+        return "Parlé isn’t paired with this vehicle yet. Add the Parlé key in the Tesla app, then try again.";
       case "mobile_access_disabled":
-        return "Mobile access is turned off for this vehicle. Enable it on the car’s touchscreen and try again.";
+        return "Mobile Access is off for this vehicle. Enable it in the Tesla, then try again.";
       case "vehicle_asleep_or_offline":
       case "asleep_timeout":
       case "offline":
-        return "The vehicle is asleep or offline. Wake it and try again.";
+        return "The vehicle is asleep or offline. Wake it, wait a moment, and try again.";
       case "vehicle_in_service":
-        return "This vehicle is currently in service mode and can’t accept commands.";
+        return "This vehicle is in service mode, so Tesla isn’t accepting remote commands.";
       case "vehicle_not_found":
       case "not_found":
-        return "We couldn’t find that vehicle.";
+        return "We couldn’t find that vehicle. Refresh your fleet and try again.";
       case "tesla_rate_limited":
       case "rate_limited":
-        return "Tesla is rate-limiting requests. Please wait a moment and try again.";
+        return "Tesla is limiting requests right now. Wait a moment and try again.";
+      case "command_rejected":
+        if (lower.includes("another renter") || lower.includes("isn’t available")) {
+          return raw;
+        }
+        return "Tesla rejected that command. It may not be supported by this vehicle or its current state.";
+      case "bad_request":
+        return "That action isn’t available for this vehicle right now.";
       case "tesla_upstream_error":
       case "tesla_error":
       case "generic_tesla_upstream_error":
-        return "Tesla’s service had a problem responding. Please try again shortly.";
+        return "Tesla didn’t complete the request. Please try again shortly.";
       default:
-        return error.message || "Something went wrong. Please try again.";
+        return raw || "Something went wrong. Please try again.";
     }
   }
+
   if (error instanceof Error && error.message) return error.message;
   return "Something went wrong. Please try again.";
 }

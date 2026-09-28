@@ -20,8 +20,8 @@ import {
   type FormEvent,
 } from "react";
 import {
-  ApiError,
   enableDriveVehicle,
+  getReadableErrorMessage,
   getVehicleStatus,
   lockVehicle,
   readyVehicle,
@@ -60,10 +60,6 @@ const PERMISSION_BY_COMMAND: Record<CommandKey, keyof VehiclePermissions> = {
   "enable-drive": "enableDrive",
   ready: "ready",
 };
-
-function errorMessage(err: unknown, fallback: string): string {
-  return err instanceof ApiError ? err.message : fallback;
-}
 
 function stateTone(state: string): "online" | "asleep" | "offline" | "neutral" {
   const s = state.toLowerCase();
@@ -148,7 +144,7 @@ export function VehicleControlCard({
         setLastUpdated(new Date().toISOString());
       } catch (err) {
         if (!mountedRef.current) return;
-        const msg = errorMessage(err, "Could not load vehicle status.");
+        const msg = getReadableErrorMessage(err);
         setStatusError(msg);
         if (!opts.background) setStatus(null);
       } finally {
@@ -232,7 +228,7 @@ export function VehicleControlCard({
     } catch (err) {
       setFeedback({
         kind: "error",
-        text: errorMessage(err, `${commandLabel(key)} failed.`),
+        text: getReadableErrorMessage(err),
       });
     } finally {
       setActiveCommand(null);
@@ -246,7 +242,7 @@ export function VehicleControlCard({
   const expiry = shared && expiresAt ? formatExpiry(expiresAt, now) : null;
 
   return (
-    <article className="flex flex-col gap-5 rounded-2xl border border-desat-2 bg-white p-6 shadow-sm">
+    <article className="flex flex-col gap-5 rounded-[22px] border border-desat-2 bg-white p-6 shadow-[0_14px_38px_rgba(29,6,51,0.05)]">
       {/* ── Header ── */}
       <header className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-4">
@@ -487,7 +483,7 @@ function CommandButton({
 }) {
   if (hidden) return null;
   const base =
-    "rounded-lg px-3.5 py-2 text-sm font-medium transition-colors disabled:opacity-50";
+    "rounded-xl px-3.5 py-2 text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50";
   const style = primary
     ? "bg-accent-primary text-white hover:opacity-90"
     : variant === "ghost"

@@ -2,8 +2,60 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: light;
+}
+
+html {
+  background: #f6f4f7;
+  scroll-behavior: smooth;
+}
+
 body {
-  background: #ffffff;
+  min-width: 320px;
+  background: #f6f4f7;
   color: #1d0633;
   font-family: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+a,
+input,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  touch-action: manipulation;
+}
+
+::selection {
+  background: rgba(145, 28, 255, 0.18);
+  color: #1d0633;
+}
+
+.parle-page-enter {
+  animation: parle-page-enter 180ms ease-out both;
+}
+
+@keyframes parle-page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .parle-page-enter {
+    animation: none;
+  }
 }
