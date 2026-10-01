@@ -57,7 +57,7 @@ interface TeslaRefreshTokenResponse {
 async function refreshAccessToken(
   userId: string,
   refreshToken: string,
-): Promise<string | null> {
+): Promise<{ accessToken: string; expiresAt: Date } | null> {
   const tokenUrl = process.env.TESLA_TOKEN_URL;
   const clientId = process.env.TESLA_CLIENT_ID;
   if (!tokenUrl || !clientId) return null;

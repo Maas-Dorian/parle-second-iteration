@@ -24,6 +24,12 @@ const Env = z.object({
   WAKE_POLL_INTERVAL_MS: z.string().default("1500"),
   COMMAND_RETRY_COUNT: z.string().default("1"),
   HTTP_TIMEOUT_MS: z.string().default("8000"),
+  // Supabase — used to VERIFY a renter's Bearer token on the public-vehicle
+  // claim / end-ride routes (identity is derived from the verified token, never
+  // from client-supplied headers alone). Optional so existing deployments keep
+  // booting; the claim route returns a clear misconfig error if unset.
+  SUPABASE_URL: z.string().url().optional(),
+  SUPABASE_ANON_KEY: z.string().min(1).optional(),
 });
 
 const env = Env.parse(process.env);
@@ -44,4 +50,6 @@ export const config = {
   wakePollIntervalMs: Number(env.WAKE_POLL_INTERVAL_MS),
   commandRetryCount: Number(env.COMMAND_RETRY_COUNT),
   httpTimeoutMs: Number(env.HTTP_TIMEOUT_MS),
+  supabaseUrl: env.SUPABASE_URL,
+  supabaseAnonKey: env.SUPABASE_ANON_KEY,
 };

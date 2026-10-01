@@ -56,6 +56,31 @@ Set:
 - `DATABASE_URL` to your Supabase Postgres connection string
 - `PARLE_API_KEY` to a strong shared secret (you will share this with Char3 backend)
 
+#### API keys: internal vs external
+
+The backend accepts the `x-parle-api-key` header matching **either** of two keys:
+
+- `PARLE_API_KEY` — existing/internal clients (e.g. Char3 backend). **Behavior unchanged.**
+- `PARLE_EXTERNAL_API_KEY` — frontend/mobile external clients (e.g. the Vercel
+  fleet web app and the Rork mobile app, which sends it as `EXPO_PUBLIC_PARLE_API_KEY`).
+
+```bash
+# Existing/internal shared secret (required)
+PARLE_API_KEY=dev_key_change_me
+
+# External frontend/mobile key (optional). When set, the backend accepts it in
+# the same x-parle-api-key header. Leaving it unset preserves single-key behavior.
+PARLE_EXTERNAL_API_KEY=<64-char-external-key>
+```
+
+A request is authorized if `x-parle-api-key` matches **either** key. Invalid or
+missing keys still return `401` with the existing error shape. Key values are
+never logged (only presence/length and which source matched).
+
+> If a frontend/mobile client gets `401 Invalid x-parle-api-key`, confirm
+> `PARLE_EXTERNAL_API_KEY` is set in the **deployed** environment (staging/prod)
+> and exactly matches the value the client sends.
+
 ### Step C — run migrations + seed
 ```bash
 npx prisma migrate deploy
@@ -159,7 +184,7 @@ curl -X POST \
 ## 6) How Char3 should call this service
 
 Required headers:
-- `x-parle-api-key: <shared_secret>`
+- `x-parle-api-key: <shared_secret>` — internal clients send `PARLE_API_KEY`; external frontend/mobile clients send `PARLE_EXTERNAL_API_KEY` (both are accepted)
 - `x-triggered-by: <supabase_user_id | system | admin>` (for audit logs)
 - `x-request-id: <uuid>` (recommended; idempotency + tracing)
 
@@ -199,6 +224,35 @@ curl.exe http://localhost:8080/.well-known/appspecific/com.tesla.3p.public-key.p
 Open this URL directly — it must return 200 and show the PEM text with no login/headers:
 - Local: `http://localhost:8080/.well-known/appspecific/com.tesla.3p.public-key.pem`
 - Production: `https://api.parlekeys.com/.well-known/appspecific/com.tesla.3p.public-key.pem`
+
+---
+
+## Tesla OAuth redirect (mobile + web)
+
+After Tesla OAuth completes, the backend redirects the browser back to either
+the mobile app or the Vercel fleet web app. Which one is used is decided by the
+`returnTo` value carried through the OAuth `state`:
+
+- **Mobile (default):** `GET /auth/tesla/start?userId=<id>` → redirects to `APP_DEEP_LINK`.
+- **Web:** `GET /auth/tesla/start?userId=<id>&returnTo=web` → redirects to `WEB_APP_DEEP_LINK`
+  (falling back to `FRONTEND_URL` + `/?linked=1`).
+
+Success returns with `linked=1`; failure returns with `linked=0` and an optional `error` param.
+
+Relevant env vars:
+
+```bash
+# Mobile deep link (existing behavior — do not remove)
+APP_DEEP_LINK=parle://auth/tesla/callback
+
+# Web fleet app (Vercel) success redirect
+WEB_APP_DEEP_LINK=https://parle-fleet-platform.vercel.app/?linked=1
+
+# Local web fleet app success redirect (use as WEB_APP_DEEP_LINK when developing)
+LOCAL_WEB_APP_DEEP_LINK=http://localhost:3000/?linked=1
+```
+
+> If `WEB_APP_DEEP_LINK` is unset, the backend falls back to `FRONTEND_URL` + `/?linked=1`.
 
 ---
 

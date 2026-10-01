@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AxiosError } from "axios";
 import { getUserAccessToken, fetchUserVehicles } from "../services/teslaAccountService.js";
 import { getVehicleOrThrow, resolveVehicle, syncVehiclesToDb } from "../services/vehicleService.js";
+import { authorizeVehicleAction, getActiveAccessAsGuest } from "../services/shareService.js";
 import { createTeslaClient } from "../clients/teslaClient.js";
 import { TeslaApi } from "../tesla/teslaApi.js";
 import { getCachedTelemetry, refreshTelemetry } from "../services/telemetryService.js";
@@ -21,6 +22,28 @@ function redactBody(data: unknown): unknown {
     out[k] = SENSITIVE_KEYS.has(k.toLowerCase()) ? "[REDACTED]" : v;
   }
   return out;
+}
+
+/**
+ * Build vehicle entries for the vehicles a user can access as a guest via an
+ * active temporary share, excluding any ids already returned as owned.
+ */
+async function sharedVehiclesFor(userId: string, ownedIds: Set<string>) {
+  const access = await getActiveAccessAsGuest(userId);
+  return access
+    .filter((a) => !ownedIds.has(a.vehicleId))
+    .map((a) => ({
+      id: a.vehicleId,
+      teslaVehicleId: a.vehicleId,
+      vin: a.vin ?? "",
+      friendlyName: a.friendlyName,
+      state: null as string | null,
+      shared: true,
+      accessId: a.id,
+      ownerUserId: a.ownerUserId,
+      expiresAt: a.expiresAt,
+      permissions: a.permissions,
+    }));
 }
 
 export async function vehiclesRoutes(app: FastifyInstance) {
@@ -44,7 +67,10 @@ export async function vehiclesRoutes(app: FastifyInstance) {
     );
 
     if (!tokenResult.ok) {
-      return ok(reply, []);
+      // Not an owner (no working Tesla token) — return any vehicles shared with
+      // this user as a guest. Pure guests reach the dashboard this way.
+      const shared = await sharedVehiclesFor(userId, new Set());
+      return ok(reply, shared);
     }
 
     const upstreamPath = "/api/1/vehicles";
@@ -78,7 +104,12 @@ export async function vehiclesRoutes(app: FastifyInstance) {
         state: v.state,
       }));
 
-      return ok(reply, results);
+      // Append vehicles shared with this user as a guest (e.g. an owner who is
+      // also a guest on someone else's vehicle), de-duped against owned ids.
+      const ownedIds = new Set(results.map((r) => r.id));
+      const shared = await sharedVehiclesFor(userId, ownedIds);
+
+      return ok(reply, [...results, ...shared]);
     } catch (err: unknown) {
       const isAxios = err instanceof AxiosError;
       const status = isAxios ? err.response?.status ?? null : null;
@@ -173,17 +204,26 @@ export async function vehiclesRoutes(app: FastifyInstance) {
 
     req.log.info({ triggeredBy: userId, routeParamId: id }, "GET /vehicles/:id/status: request");
 
-    // ── Per-user Tesla token ──
-    const tokenResult = await getUserAccessToken(userId);
+    // ── Share-aware authorization (owner or active guest) ──
+    let auth;
+    try {
+      auth = await authorizeVehicleAction(userId, id, "status");
+    } catch (err) {
+      return fail(reply, err);
+    }
+    const tokenResult = auth.tokenResult;
 
     req.log.info(
       {
         triggeredBy: userId,
+        role: auth.role,
+        ownerUserId: auth.ownerUserId,
+        accessId: auth.accessId,
         hasAccount: tokenResult.ok,
         reason: tokenResult.ok ? undefined : tokenResult.reason,
         tokenRefreshed: tokenResult.ok ? tokenResult.refreshed : false,
       },
-      "GET /vehicles/:id/status: Tesla account lookup",
+      "GET /vehicles/:id/status: authorization + Tesla account lookup",
     );
 
     if (!tokenResult.ok) {

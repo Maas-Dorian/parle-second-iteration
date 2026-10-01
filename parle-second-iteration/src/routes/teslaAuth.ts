@@ -24,6 +24,7 @@ function makeChallenge(verifier: string) {
 
 interface StartQuery {
   userId?: string;
+  returnTo?: string;
 }
 
 interface CallbackQuery {
@@ -39,6 +40,89 @@ interface TeslaTokenResponse {
   expires_in: number;
 }
 
+/** Where the OAuth flow originated. Mobile is the default/legacy behavior. */
+type ReturnTo = "web" | "mobile";
+
+const DEFAULT_APP_DEEP_LINK = "parle://auth/tesla/callback";
+
+/** Normalize an arbitrary query value into a known ReturnTo. */
+function parseReturnTo(value: unknown): ReturnTo {
+  return value === "web" ? "web" : "mobile";
+}
+
+/**
+ * Encode the originating platform into the OAuth state so the callback can
+ * decide where to redirect. Format: "<returnTo>.<nonce>". The nonce keeps the
+ * state unique (and unguessable); the prefix survives the Tesla round-trip.
+ */
+function encodeState(returnTo: ReturnTo, nonce: string): string {
+  return `${returnTo}.${nonce}`;
+}
+
+/** Decode the originating platform from a state string. Defaults to mobile. */
+function decodeReturnTo(state: string): ReturnTo {
+  return state.split(".")[0] === "web" ? "web" : "mobile";
+}
+
+/**
+ * Build the redirect target for the web fleet app.
+ * - Success: WEB_APP_DEEP_LINK, falling back to FRONTEND_URL + "/?linked=1".
+ * - Failure: same base but forced to linked=0 (+ optional error param).
+ */
+function webRedirect(success: boolean, error?: string): string {
+  if (success) {
+    if (process.env.WEB_APP_DEEP_LINK) return process.env.WEB_APP_DEEP_LINK;
+    const frontend = (process.env.FRONTEND_URL ?? "").replace(/\/+$/, "");
+    return `${frontend}/?linked=1`;
+  }
+
+  const base =
+    process.env.WEB_APP_DEEP_LINK ??
+    (process.env.FRONTEND_URL
+      ? `${process.env.FRONTEND_URL.replace(/\/+$/, "")}/`
+      : null);
+
+  if (base) {
+    try {
+      const url = new URL(base);
+      url.searchParams.set("linked", "0");
+      if (error) url.searchParams.set("error", error);
+      else url.searchParams.delete("error");
+      return url.toString();
+    } catch {
+      // fall through to relative fallback
+    }
+  }
+
+  const query = new URLSearchParams({ linked: "0" });
+  if (error) query.set("error", error);
+  return `/?${query.toString()}`;
+}
+
+/**
+ * Build the redirect target for the mobile app. Preserves existing behavior:
+ * APP_DEEP_LINK (falling back to parle://auth/tesla/callback) + linked flag.
+ */
+function mobileRedirect(success: boolean, error?: string): string {
+  const base = process.env.APP_DEEP_LINK ?? DEFAULT_APP_DEEP_LINK;
+  if (success) return `${base}?linked=1`;
+  const sep = base.includes("?") ? "&" : "?";
+  let url = `${base}${sep}linked=0`;
+  if (error) url += `&error=${encodeURIComponent(error)}`;
+  return url;
+}
+
+/** Resolve the final redirect URL based on where the flow originated. */
+function buildRedirect(
+  returnTo: ReturnTo,
+  success: boolean,
+  error?: string,
+): string {
+  return returnTo === "web"
+    ? webRedirect(success, error)
+    : mobileRedirect(success, error);
+}
+
 export async function teslaAuthRoutes(app: FastifyInstance) {
   app.get<{ Querystring: StartQuery }>("/auth/tesla/start", async (req, reply) => {
     const userId = req.query.userId;
@@ -47,9 +131,10 @@ export async function teslaAuthRoutes(app: FastifyInstance) {
       return reply.code(400).send({ ok: false, error: "missing userId" });
     }
 
+    const returnTo = parseReturnTo(req.query.returnTo);
     const verifier = makeVerifier();
     const challenge = makeChallenge(verifier);
-    const state = crypto.randomBytes(16).toString("hex");
+    const state = encodeState(returnTo, crypto.randomBytes(16).toString("hex"));
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min
 
     await prisma.teslaOAuthSession.create({
@@ -79,10 +164,9 @@ export async function teslaAuthRoutes(app: FastifyInstance) {
     const { code, state, error, error_description } = req.query;
 
     if (error) {
+      const returnTo = state ? decodeReturnTo(state) : "mobile";
       return reply.redirect(
-        `${process.env.APP_DEEP_LINK}?linked=0&error=${encodeURIComponent(
-          error_description ?? error
-        )}`
+        buildRedirect(returnTo, false, error_description ?? error),
       );
     }
 
@@ -163,11 +247,13 @@ export async function teslaAuthRoutes(app: FastifyInstance) {
         where: { state },
       });
 
-      return reply.redirect(`${process.env.APP_DEEP_LINK}?linked=1`);
+      const returnTo = decodeReturnTo(state);
+      return reply.redirect(buildRedirect(returnTo, true));
     } catch (err) {
       req.log.error(err, "Tesla token exchange failed");
+      const returnTo = decodeReturnTo(state);
       return reply.redirect(
-        `${process.env.APP_DEEP_LINK}?linked=0&error=token_exchange_failed`
+        buildRedirect(returnTo, false, "token_exchange_failed"),
       );
     }
   });

@@ -118,3 +118,47 @@ model TeslaOAuthSession {
   createdAt  DateTime @default(now())
   expiresAt  DateTime
 }
+
+// ── Temporary vehicle sharing (ride-share codes) ──────────
+// Lets a Tesla-connected owner grant another logged-in Parlé user temporary,
+// app-level access to a vehicle WITHOUT sharing Tesla tokens. Commands from a
+// guest are executed with the owner's Tesla connection, gated by an active
+// TemporaryVehicleAccess record and its permissions.
+
+model VehicleShareCode {
+  id           String   @id @default(cuid())
+  ownerUserId  String
+  vehicleId    String
+  vin          String?
+  friendlyName String?
+  code         String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+
+  @@index([ownerUserId])
+  @@index([vehicleId])
+  @@index([code])
+}
+
+model TemporaryVehicleAccess {
+  id           String    @id @default(cuid())
+  ownerUserId  String
+  guestUserId  String
+  vehicleId    String
+  vin          String?
+  friendlyName String?
+  // Null for renter "public claim" grants (POST /vehicles/:id/claim); set for
+  // grants created by redeeming a share code. Used to decide whether ending a
+  // ride should return the vehicle to public availability.
+  shareCodeId  String?
+  permissions  Json
+  startsAt     DateTime  @default(now())
+  expiresAt    DateTime
+  createdAt    DateTime  @default(now())
+  revokedAt    DateTime?
+
+  @@index([guestUserId])
+  @@index([ownerUserId])
+  @@index([vehicleId])
+}
